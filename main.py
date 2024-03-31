@@ -15,9 +15,9 @@ from rich.progress import Progress, TextColumn, BarColumn, TaskProgressColumn, T
 
 DOMAIN = 'https://rule34.xxx/'
 LIST_URL_TEMPLATE = urljoin(DOMAIN, '/index.php?page=post&s=list&tags=%(tags)s&pid=%(pid)d')
-IMG_URL_TEMPLATE = urljoin(DOMAIN, '/index.php?page=post&s=view&id=%(id)s')
+FILE_URL_TEMPLATE = urljoin(DOMAIN, '/index.php?page=post&s=view&id=%(id)s')
 
-IMAGES_ON_PAGE = 42
+THUMBS_ON_PAGE = 42
 
 
 class DownloadProgress(Progress):
@@ -94,15 +94,15 @@ def get_count_by_thumbs(soup: bs) -> int | None:
 
 
 def get_count(soup: bs) -> int | None:
-    image_count = get_count_by_thumbs(soup)
+    file_count = get_count_by_thumbs(soup)
 
     paginator = soup.find('div', id='paginator')
     if not paginator:
-        return image_count
+        return file_count
 
     links = paginator.find_all('a')
     if len(links) <= 0:
-        return image_count
+        return file_count
 
     def get_pid(href):
         try:
@@ -110,30 +110,30 @@ def get_count(soup: bs) -> int | None:
         except Exception:
             return None
 
-    image_count = get_pid(links[-1]['href']) or image_count
+    file_count = get_pid(links[-1]['href']) or file_count
 
-    return image_count
+    return file_count
 
 
 @dataclass
 class RequestInfo:
-    image_count: int
+    file_count: int
     page_count: int
 
 
 def get_request_info(session: requests.Session, tags: list, skip: int = 0) -> RequestInfo:
     url = LIST_URL_TEMPLATE % {
         'tags': quote_plus(' '.join(tags)),
-        'pid': (skip // IMAGES_ON_PAGE) * IMAGES_ON_PAGE,
+        'pid': (skip // THUMBS_ON_PAGE) * THUMBS_ON_PAGE,
     }
 
     page = session.get(url)
     soup = bs(page.content, 'lxml')
 
-    image_count = max((get_count(soup) or 0) - skip, 0)
-    page_count = (image_count // IMAGES_ON_PAGE) + 1
+    file_count = max((get_count(soup) or 0) - skip, 0)
+    page_count = (file_count // THUMBS_ON_PAGE) + 1
 
-    return RequestInfo(image_count, page_count)
+    return RequestInfo(file_count, page_count)
 
 
 def get_extension(url: str):
@@ -143,11 +143,11 @@ def get_extension(url: str):
     return m.group(0)
 
 
-def download_image(session: requests.Session, url: str, path: str, on_progress, on_start):
-    image_stream = session.get(url, stream=True)
-    if image_stream.status_code != 200:
+def download_file(session: requests.Session, url: str, path: str, on_progress, on_start):
+    file_stream = session.get(url, stream=True)
+    if file_stream.status_code != 200:
         logging.warning(f'Ошибка загрузки изображения "{url}"')
-    total_length = image_stream.headers.get('content-length')
+    total_length = file_stream.headers.get('content-length')
     if total_length:
         total_length = int(total_length)
     else:
@@ -156,44 +156,50 @@ def download_image(session: requests.Session, url: str, path: str, on_progress, 
         on_start(total_length)
     with open(path, 'wb') as f:
         if total_length > 0:
-            for data in image_stream.iter_content(chunk_size=4096):
+            for data in file_stream.iter_content(chunk_size=4096):
                 f.write(data)
                 if on_progress:
                     on_progress(len(data))
         else:
-            f.write(image_stream.content)
-            # image_stream.raw.decode_content = True
-            # shutil.copyfileobj(image_stream.raw, f)
+            f.write(file_stream.content)
 
 
 @dataclass
-class R34Image:
+class R34File:
     session: requests.Session
     id: int
     thumbnail_url: str
 
     def download(self, path: str, *args, **kwargs) -> None:
-        url = IMG_URL_TEMPLATE % { 'id': self.id }
+        url = FILE_URL_TEMPLATE % { 'id': self.id }
         page = session.get(url)
         soup = bs(page.content, 'lxml')
         image_elm = soup.find('img', id='image')
-        if not image_elm:
-            logging.warning(f'Изображение не найдено на странице {url}')
+        video_elm = soup.find('video', id='gelcomVideoPlayer')
+        if video_elm:
+            video_elm = video_elm.find('source')
+        if not image_elm and not video_elm:
+            logging.warning(f'Контент не найден на странице {url}')
             return
-        image_url = soup.find('img', id='image')['src']
+        if video_elm:
+            file_url = video_elm['src']
+            ext = get_extension(file_url)
+            download_file(self.session, file_url, os.path.join(path, f'{self.id}{ext}'), *args, **kwargs)
+        if image_elm:
+            file_url = image_elm['src']
+            ext = get_extension(file_url)
+            download_file(self.session, file_url, os.path.join(path, f'{self.id}{ext}'), *args, **kwargs)
 
-        ext = get_extension(image_url)
-        download_image(self.session, image_url, os.path.join(path, f'{self.id}{ext}'), *args, **kwargs)
 
     def download_thumbnail(self, path: str, *args, **kwargs):
         ext = get_extension(self.thumbnail_url)
-        download_image(self.session, self.thumbnail_url, os.path.join(path, f'thumb_{self.id}{ext}'), *args, **kwargs)
+        download_file(self.session, self.thumbnail_url, os.path.join(path, f'thumb_{self.id}{ext}'), *args, **kwargs)
 
 
 def get_page_images(session: requests.Session, tags: list[str], skip: int = 0):
     url = LIST_URL_TEMPLATE % {
         'tags': quote_plus(' '.join(tags)),
-        'pid': (skip // IMAGES_ON_PAGE) * IMAGES_ON_PAGE,
+        'pid': (skip // THUMBS_ON_PAGE) * THUMBS_ON_PAGE,
     }
 
     page = session.get(url)
@@ -207,22 +213,22 @@ def get_page_images(session: requests.Session, tags: list[str], skip: int = 0):
     for link in preview_links:
         id = int(link['id'][1:])
         thumbnail_url = link.find('img', class_='preview')['src']
-        images.append(R34Image(session, id, thumbnail_url))
+        images.append(R34File(session, id, thumbnail_url))
     return images
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(
         prog='r34parser',
-        description='Загружает картинки по тегам с R34',
+        description='Загружает файлы с R34 по вписанным тегам',
     )
 
-    parser.add_argument('-d', '--delay', type=int, default=1000, help='Задержка между запросами в мс. По-умолчанию: %(default)s.')
-    parser.add_argument('-s', '--skip', type=int, default=0, help='Пропустить первые `SKIP` изображений.')
+    parser.add_argument('-d', '--delay', type=int, default=1000, help='Задержка между запросами в мс. Нужна чтобы не получить бан. По-умолчанию: %(default)s.')
+    parser.add_argument('-s', '--skip', type=int, default=0, help='Пропустить первые `SKIP` файлов.')
     parser.add_argument('-c', '--count', default='1p', help='Как много необходимо скачать (суффикс `p` означает считать в страницах). По-умолчанию: %(default)s.')
     parser.add_argument('-t', '--thumbnails-only', action='store_true', help='Скачать только превью.')
     parser.add_argument('-v', '--verbose', action='count', default=0)
-    parser.add_argument('-o', '--output-directory', type=str, help='Путь для скачанных изображений. По-умолчанию будет создана директория с тегами в названии.')
+    parser.add_argument('-o', '--output-directory', type=str, help='Путь для скачанных файлов. По-умолчанию будет создана директория с тегами в названии.')
 
     parser.add_argument('tags', nargs=argparse.REMAINDER, type=str, help='Теги для поиска. Негативные теги начинаются с `-`. Пример: `%(prog)s sfw -nsfw`')
 
@@ -235,10 +241,10 @@ if __name__ == '__main__':
 
     info = get_request_info(session, args.tags, args.skip)
 
-    if info.image_count > 0:
-        logging.info(f'Найдено {info.image_count} изображений на {info.page_count} страницах!')
+    if info.file_count > 0:
+        logging.info(f'Найдено {info.file_count} файлов на {info.page_count} страницах!')
     else:
-        logging.error('Изображения не найдены! Выход...')
+        logging.error('Контент не найден! Выход...')
         exit(1)
 
     logging.info(f'Поиск по тегам: "{" ".join(args.tags)}"')
@@ -250,20 +256,20 @@ if __name__ == '__main__':
     count = 0
     if args.count[-1] == 'p':
         page_count = int(args.count[:-1])
-        count = page_count * IMAGES_ON_PAGE
+        count = page_count * THUMBS_ON_PAGE
     else:
         count = int(args.count)
-        page_count = math.ceil(count / IMAGES_ON_PAGE)
-    count = min(count, info.image_count - args.skip)
-    page_count = min(page_count, info.page_count - math.ceil(args.skip / IMAGES_ON_PAGE))
-    logging.debug(f'Будет загружено: {page_count} страниц, {count} изображений')
+        page_count = math.ceil(count / THUMBS_ON_PAGE)
+    count = min(count, info.file_count - args.skip)
+    page_count = min(page_count, info.page_count - math.ceil(args.skip / THUMBS_ON_PAGE))
+    logging.debug(f'Будет загружено: {page_count} страниц, {count} файлов')
 
     pid = 0
     page_idx = 1
     try:
         with DownloadProgress(expand=True) as progress:
             total_task = progress.add_task('Всего страниц:', total=page_count, progress_type='total')
-            page_task = progress.add_task('Текущая страница:', total=IMAGES_ON_PAGE, progress_type='page')
+            page_task = progress.add_task('Текущая страница:', total=THUMBS_ON_PAGE, progress_type='page')
             file_task = progress.add_task('Текущий файл:', total=0, progress_type='file')
             
             def on_file_start(total):
@@ -273,13 +279,13 @@ if __name__ == '__main__':
                 progress.update(file_task, advance=advance)
 
             while pid < count:
-                files = get_page_images(session, args.tags, (args.skip // IMAGES_ON_PAGE) * IMAGES_ON_PAGE + pid)
+                files = get_page_images(session, args.tags, (args.skip // THUMBS_ON_PAGE) * THUMBS_ON_PAGE + pid)
                 progress.update(page_task, total=len(files), completed=0)
-                for image in files:
+                for file in files:
                     if args.thumbnails_only:
-                        image.download_thumbnail(out_dir, on_start=on_file_start, on_progress=on_file_update)
+                        file.download_thumbnail(out_dir, on_start=on_file_start, on_progress=on_file_update)
                     else:
-                        image.download(out_dir, on_start=on_file_start, on_progress=on_file_update)
+                        file.download(out_dir, on_start=on_file_start, on_progress=on_file_update)
                     pid += 1
                     progress.update(page_task, advance=1)
                 page_idx += 1
