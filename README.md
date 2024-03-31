@@ -1,6 +1,6 @@
 # Простой парсер для загрузки изображений с rule34xxx
 ```bash
-usage: r34parser [-h] [-d DELAY] [-s SKIP] [-c COUNT] [-t] [-v] [-o OUTPUT_DIRECTORY] ...
+usage: r34parser [-h] [-d DELAY] [-s SKIP] [-c COUNT] [-t] [-v] [-o OUTPUT_DIRECTORY] [-f FORMAT] ...
 
 Загружает файлы с R34 по вписанным тегам
 
@@ -18,7 +18,10 @@ options:
                         Скачать только превью.
   -v, --verbose
   -o OUTPUT_DIRECTORY, --output-directory OUTPUT_DIRECTORY
-                        Путь для скачанных файлов. По-умолчанию будет создана директория с тегами в названии.
+                        Путь для скачанных файлов. Если в конце содержит `*`, в указанном месте будет добавлена директория по заданным тегам. По-умолчанию будет создана директория с тегами в
+                        названии.
+  -f FORMAT, --format FORMAT
+                        Формат для имён загруженных файлов. Доступные переменные: id, pid, ext, artist, copyright, character, general, metadata. По-умолчанию: `{id}{ext}`
 ```
 
 ## Зависимости
