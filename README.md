@@ -1,4 +1,4 @@
-# Простой парсер для загрузки изображений с rule34xxx
+# Простой парсер для загрузки видео и изображений с rule34xxx
 ```bash
 usage: r34parser [-h] [-d DELAY] [-s SKIP] [-c COUNT] [-t] [-v] [-o OUTPUT_DIRECTORY] [-f FORMAT] ...
 
