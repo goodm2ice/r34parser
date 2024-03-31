@@ -1,6 +1,7 @@
-# Простой парсер для загрузки видео и изображений с rule34xxx
+[Описание на русском](#russian)
 
 # English
+Simple parser for downloading video and images from rule34xxx
 ```bash
 usage: r34parser [-h] [-d DELAY] [-s SKIP] [-c COUNT] [-t] [-o OUTPUT_DIRECTORY] [-f FORMAT] [--locale {en_US,ru_RU}] [-v] ...
 
@@ -42,6 +43,7 @@ pip install -r requirements.txt
 ```
 
 # Russian
+Простой парсер для загрузки видео и изображений с rule34xxx
 ```bash
 usage: r34parser [-h] [-d DELAY] [-s SKIP] [-c COUNT] [-t] [-o OUTPUT_DIRECTORY] [-f FORMAT] [--locale {en_US,ru_RU}] [-v] ...
 
