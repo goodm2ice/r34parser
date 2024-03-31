@@ -169,26 +169,60 @@ class R34File:
     session: requests.Session
     id: int
     thumbnail_url: str
+    page: bs | None = None
+    props = None
 
-    def download(self, path: str, *args, **kwargs) -> None:
+    def load_page(self) -> None:
         url = FILE_URL_TEMPLATE % { 'id': self.id }
         page = session.get(url)
-        soup = bs(page.content, 'lxml')
-        image_elm = soup.find('img', id='image')
-        video_elm = soup.find('video', id='gelcomVideoPlayer')
+        self.page = bs(page.content, 'lxml')
+
+    def load_props(self) -> None:
+        if not self.page:
+            self.load_page()
+        tag_sidebar = self.page.find('ul', id='tag-sidebar')
+        tag_types = ('copyright', 'character', 'artist', 'general', 'metadata')
+        props = { 'id': self.id }
+        for tag_type in tag_types:
+            li_list = tag_sidebar.findAll('li', class_=f'tag-type-{tag_type}')
+            out = []
+            for li in li_list:
+                if len(li) < 1:
+                    continue
+                href = li.findAll('a')[-1]['href']
+                idx = href.find('&tags=')
+                if idx < 0:
+                    continue
+                out.append(href[idx+6:])
+
+            props[tag_type] = ' '.join(out)
+        
+        self.props = props
+
+
+    def download(self, path: str, format: str | None = None, pid: int | None = None, *args, **kwargs) -> None:
+        if not self.page or not self.props:
+            self.load_page()
+            self.load_props()
+        image_elm = self.page.find('img', id='image')
+        video_elm = self.page.find('video', id='gelcomVideoPlayer')
         if video_elm:
             video_elm = video_elm.find('source')
         if not image_elm and not video_elm:
             logging.warning(f'Контент не найден на странице {url}')
             return
+
+        def get_filename(ext: str):
+            return (format or '{id}{ext}').format(ext=ext, pid=pid, **self.props)
+
         if video_elm:
             file_url = video_elm['src']
             ext = get_extension(file_url)
-            download_file(self.session, file_url, os.path.join(path, f'{self.id}{ext}'), *args, **kwargs)
+            download_file(self.session, file_url, os.path.join(path, get_filename(ext)), *args, **kwargs)
         if image_elm:
             file_url = image_elm['src']
             ext = get_extension(file_url)
-            download_file(self.session, file_url, os.path.join(path, f'{self.id}{ext}'), *args, **kwargs)
+            download_file(self.session, file_url, os.path.join(path, get_filename(ext)), *args, **kwargs)
 
 
     def download_thumbnail(self, path: str, *args, **kwargs):
@@ -228,7 +262,8 @@ if __name__ == '__main__':
     parser.add_argument('-c', '--count', default='1p', help='Как много необходимо скачать (суффикс `p` означает считать в страницах). По-умолчанию: %(default)s.')
     parser.add_argument('-t', '--thumbnails-only', action='store_true', help='Скачать только превью.')
     parser.add_argument('-v', '--verbose', action='count', default=0)
-    parser.add_argument('-o', '--output-directory', type=str, help='Путь для скачанных файлов. По-умолчанию будет создана директория с тегами в названии.')
+    parser.add_argument('-o', '--output-directory', type=str, help='Путь для скачанных файлов. Если в конце содержит `*`, в указанном месте будет добавлена директория по заданным тегам. По-умолчанию будет создана директория с тегами в названии.')
+    parser.add_argument('-f', '--format', type=str, help='Формат для имён загруженных файлов. Доступные переменные: id, pid, ext, artist, copyright, character, general, metadata. По-умолчанию: `{id}{ext}`')
 
     parser.add_argument('tags', nargs=argparse.REMAINDER, type=str, help='Теги для поиска. Негативные теги начинаются с `-`. Пример: `%(prog)s sfw -nsfw`')
 
@@ -282,11 +317,11 @@ if __name__ == '__main__':
                 files = get_page_images(session, args.tags, (args.skip // THUMBS_ON_PAGE) * THUMBS_ON_PAGE + pid)
                 progress.update(page_task, total=len(files), completed=0)
                 for file in files:
+                    pid += 1
                     if args.thumbnails_only:
                         file.download_thumbnail(out_dir, on_start=on_file_start, on_progress=on_file_update)
                     else:
-                        file.download(out_dir, on_start=on_file_start, on_progress=on_file_update)
-                    pid += 1
+                        file.download(out_dir, args.format, pid, on_start=on_file_start, on_progress=on_file_update)
                     progress.update(page_task, advance=1)
                 page_idx += 1
                 progress.update(total_task, advance=1)
