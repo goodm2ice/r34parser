@@ -1,0 +1,27 @@
+{
+    "prog_description": "Download files from R34 by search tags",
+    "arg_delay_help": "Delay between requests in ms. Needed to avoid getting banned. By default: %(default)s.",
+    "arg_skip_help": "Skip first `SKIP` files.",
+    "arg_count_help": "Downloading files/pages count (suffix `p` means pages). By default: %(default)s.",
+    "arg_thumbnails_only_help": "Download preview only.",
+    "arg_output_directory_help": "'Directory path for downloaded files. If it contains `*` at the end, a directory using the specified tags will be created at the specified location. By default, a directory with tags in the name will be created.'",
+    "arg_format_help": "Format for names of downloaded files. Available variables: id, pid, ext, artist, copyright, character, general, metadata. By default: `{{id}}{{ext}}`",
+    "arg_locale_help": "Program output language",
+    "arg_tags_help": "'Search tags. Negative tags begins with `-`. Example: `%(prog)s sfw -nsfw`'",
+
+    "founded_files": "Found {files} files on {pages} pages!",
+    "content_not_found": "Content not found! Exiting...",
+    "search_tags": "Search tags: {tags}",
+    "output_directory": "Output directory: {directory}",
+    "download_count": "Will be loaded: {pages} pages, {files} files",
+
+    "total_pages": "Total pages:",
+    "current_page": "Current page:",
+    "current_file": "Current file:",
+
+    "file_loading_error": "Error loading file {url}",
+    "page_content_not_found": "Content not found on {url}",
+    "preview_not_found": "Preview node not found",
+
+    "exiting": "Exiting..."
+}

@@ -7,17 +7,59 @@ import os
 import time
 import shutil
 import math
+import json
+import locale
 
 import requests
 from bs4 import BeautifulSoup as bs
 from rich.logging import RichHandler
 from rich.progress import Progress, TextColumn, BarColumn, TaskProgressColumn, TimeRemainingColumn, TimeElapsedColumn
 
+LOCALES = [f[:-5] for f in os.listdir(os.path.join(os.path.dirname(__file__), f'locales')) if f.endswith('.json')]
+
 DOMAIN = 'https://rule34.xxx/'
 LIST_URL_TEMPLATE = urljoin(DOMAIN, '/index.php?page=post&s=list&tags=%(tags)s&pid=%(pid)d')
 FILE_URL_TEMPLATE = urljoin(DOMAIN, '/index.php?page=post&s=view&id=%(id)s')
 
 THUMBS_ON_PAGE = 42
+
+
+class Translator:
+    def __init__(self, _locale = None):
+        new_locale = _locale or locale.getlocale()[0]
+        try:
+            self.change_locale(new_locale)
+        except:
+            try:
+                self.change_locale('ru_RU')
+            except:
+                try:
+                    self.change_locale('en_US')
+                except Exception as e:
+                    logging.critical(e)
+                    exit(1)
+
+    def change_locale(self, new_locale: str):
+        path = Translator.get_locale_path(new_locale)
+        if not os.path.exists(path) or not os.path.isfile(path):
+            raise FileNotFoundError('Locale file not found')
+        messages = None
+        with open(path, 'r', encoding='utf-8') as f:
+            messages = json.load(f)
+        self.locale = new_locale
+        self.locale_path = path
+        self.messages = messages
+
+    @staticmethod
+    def get_locale_path(locale):
+        return os.path.join(os.path.dirname(__file__), f'locales/{locale}.json')
+
+    def register(self):
+        global _
+        _ = lambda name, *args, **kwargs: self.translate(name, *args, **kwargs)
+
+    def translate(self, name, *args, **kwargs):
+        return self.messages.get(name, f'<{name}>').format(*args, **kwargs)
 
 
 class DownloadProgress(Progress):
@@ -146,7 +188,7 @@ def get_extension(url: str):
 def download_file(session: requests.Session, url: str, path: str, on_progress, on_start):
     file_stream = session.get(url, stream=True)
     if file_stream.status_code != 200:
-        logging.warning(f'Ошибка загрузки изображения "{url}"')
+        logging.warning(_('file_loading_error', url=url))
     total_length = file_stream.headers.get('content-length')
     if total_length:
         total_length = int(total_length)
@@ -209,7 +251,7 @@ class R34File:
         if video_elm:
             video_elm = video_elm.find('source')
         if not image_elm and not video_elm:
-            logging.warning(f'Контент не найден на странице {url}')
+            logging.warning(_('page_content_not_found', url=url))
             return
 
         def get_filename(ext: str):
@@ -240,7 +282,7 @@ def get_page_images(session: requests.Session, tags: list[str], skip: int = 0):
     soup = bs(page.content, 'lxml')
     post_list = soup.find('div', id='post-list')
     if not post_list:
-        logging.warning('Блок превью не найден на странице')
+        logging.warning(_('preview_not_found'))
         return []
     preview_links = post_list.find_all('span', class_='thumb')
     images = []
@@ -252,22 +294,30 @@ def get_page_images(session: requests.Session, tags: list[str], skip: int = 0):
 
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(
-        prog='r34parser',
-        description='Загружает файлы с R34 по вписанным тегам',
-    )
+    logging.basicConfig(level=logging.NOTSET, format='%(message)s', datefmt='[%X]', handlers=[RichHandler()])
 
-    parser.add_argument('-d', '--delay', type=int, default=1000, help='Задержка между запросами в мс. Нужна чтобы не получить бан. По-умолчанию: %(default)s.')
-    parser.add_argument('-s', '--skip', type=int, default=0, help='Пропустить первые `SKIP` файлов.')
-    parser.add_argument('-c', '--count', default='1p', help='Как много необходимо скачать (суффикс `p` означает считать в страницах). По-умолчанию: %(default)s.')
-    parser.add_argument('-t', '--thumbnails-only', action='store_true', help='Скачать только превью.')
+    env_lang = os.environ['LANG']
+    lang = list(filter(lambda x: x.find(env_lang) >= 0, LOCALES))
+    lang = lang[0] if len(lang) > 0 else None
+
+    translator = Translator(lang)
+    translator.register()
+
+    parser = argparse.ArgumentParser(prog='r34parser', description=_('prog_description'))
+    parser.add_argument('-d', '--delay', type=int, default=1000, help=_('arg_delay_help'))
+    parser.add_argument('-s', '--skip', type=int, default=0, help=_('arg_skip_help'))
+    parser.add_argument('-c', '--count', default='1p', help=_('arg_count_help'))
+    parser.add_argument('-t', '--thumbnails-only', action='store_true', help=_('arg_thumbnails_only_help'))
+    parser.add_argument('-o', '--output-directory', type=str, help=_('arg_output_directory_help'))
+    parser.add_argument('-f', '--format', type=str, help=_('arg_format_help'))
+    parser.add_argument('--locale', choices=LOCALES, default=lang or 'ru_RU', help=_('arg_locale_help'))
     parser.add_argument('-v', '--verbose', action='count', default=0)
-    parser.add_argument('-o', '--output-directory', type=str, help='Путь для скачанных файлов. Если в конце содержит `*`, в указанном месте будет добавлена директория по заданным тегам. По-умолчанию будет создана директория с тегами в названии.')
-    parser.add_argument('-f', '--format', type=str, help='Формат для имён загруженных файлов. Доступные переменные: id, pid, ext, artist, copyright, character, general, metadata. По-умолчанию: `{id}{ext}`')
 
-    parser.add_argument('tags', nargs=argparse.REMAINDER, type=str, help='Теги для поиска. Негативные теги начинаются с `-`. Пример: `%(prog)s sfw -nsfw`')
+    parser.add_argument('tags', nargs=argparse.REMAINDER, type=str, help=_('arg_tags_help'))
 
     args = parser.parse_args()
+
+    translator.change_locale(args.locale)
 
     log_level = (2 - min(args.verbose, 2)) * 10
     logging.basicConfig(level=log_level, format='%(message)s', datefmt='[%X]', handlers=[RichHandler()])
@@ -277,15 +327,15 @@ if __name__ == '__main__':
     info = get_request_info(session, args.tags, args.skip)
 
     if info.file_count > 0:
-        logging.info(f'Найдено {info.file_count} файлов на {info.page_count} страницах!')
+        logging.info(_('founded_files', files=info.file_count, pages=info.page_count))
     else:
-        logging.error('Контент не найден! Выход...')
+        logging.error(_('content_not_found'))
         exit(1)
 
-    logging.info(f'Поиск по тегам: "{" ".join(args.tags)}"')
+    logging.info(_('search_tags', tags=' '.join(args.tags)))
 
     out_dir = prepare_dir(args.output_directory)
-    logging.info(f'Конечная директория: "{out_dir}"')
+    logging.info(_('output_directory', directory=out_dir))
 
     page_count = 0
     count = 0
@@ -297,15 +347,15 @@ if __name__ == '__main__':
         page_count = math.ceil(count / THUMBS_ON_PAGE)
     count = min(count, info.file_count - args.skip)
     page_count = min(page_count, info.page_count - math.ceil(args.skip / THUMBS_ON_PAGE))
-    logging.debug(f'Будет загружено: {page_count} страниц, {count} файлов')
+    logging.debug(_('download_count', pages=page_count, files=count))
 
     pid = 0
     page_idx = 1
     try:
         with DownloadProgress(expand=True) as progress:
-            total_task = progress.add_task('Всего страниц:', total=page_count, progress_type='total')
-            page_task = progress.add_task('Текущая страница:', total=THUMBS_ON_PAGE, progress_type='page')
-            file_task = progress.add_task('Текущий файл:', total=0, progress_type='file')
+            total_task = progress.add_task(_('total_pages'), total=page_count, progress_type='total')
+            page_task = progress.add_task(_('current_page'), total=THUMBS_ON_PAGE, progress_type='page')
+            file_task = progress.add_task(_('current_file'), total=0, progress_type='file')
             
             def on_file_start(total):
                 progress.update(file_task, total=total, completed=0)
@@ -326,5 +376,5 @@ if __name__ == '__main__':
                 page_idx += 1
                 progress.update(total_task, advance=1)
     except KeyboardInterrupt:
-        logging.critical('Выход...')
+        logging.critical(_('exiting'))
         exit(1)
